@@ -278,12 +278,21 @@ and a *b=0* average for reference to the subsequent steps of preprocessing was c
         function=_unpack, output_names=["dwi_file", "metadata", "bvec", "bval"]),
         name="split_info", run_without_submitting=True)
 
-    early_b0ref_wf = init_early_b0ref_wf()
+    early_b0ref_wf = init_early_b0ref_wf(
+        freesurfer=config.workflow.run_reconall
+    )
+    early_b0ref_wf.inputs.inputnode.subjects_dir = str(config.execution.fs_subjects_dir.absolute())
+
     workflow.connect([
         (inputnode, split_info, [("dwi_data", "in_tuple")]),
         (split_info, early_b0ref_wf, [("dwi_file", "inputnode.dwi_file"),
                                       ("bvec", "inputnode.in_bvec"),
                                       ("bval", "inputnode.in_bval")]),
+        #(fsinputnode, early_b0ref_wf, [("subjects_dir", "inputnode.subjects_dir")]),
+        (bids_info, early_b0ref_wf, [(('subject', _prefix), 'inputnode.subject_id')]),
+        (anat_preproc_wf, early_b0ref_wf, [
+            ('outputnode.fsnative2t1w_xfm', 'inputnode.fsnative2t1w_xfm')
+        ]),
         (split_info, referencenode, [("dwi_file", "dwi_file"),
                                      ("metadata", "metadata")]),
         (early_b0ref_wf, referencenode, [

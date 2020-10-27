@@ -10,11 +10,13 @@ from niworkflows.interfaces.nibabel import ApplyMask
 from niworkflows.interfaces.utils import CopyXForm
 
 from ...interfaces.images import ExtractB0, RescaleB0
-
+from .registration import init_bbreg_wf
 
 def init_dwi_reference_wf(
     mem_gb,
     omp_nthreads,
+    freesurfer=True,
+    use_bbr=True,
     name='dwi_reference_wf'
 ):
     """
@@ -42,6 +44,11 @@ def init_dwi_reference_wf(
         Maximum number of threads an individual process may use
     name : str
         Name of workflow (default: ``dwi_reference_wf``)
+    freesurfer : :obj:`bool`
+        Enable FreeSurfer functional registration (bbregister)
+    use_bbr : :obj:`bool` or None
+        Enable/disable boundary-based registration refinement.
+        If ``None``, test BBR result for distortion before accepting.
 
     Inputs
     ------
@@ -49,6 +56,12 @@ def init_dwi_reference_wf(
         dwi NIfTI file
     b0_ixs : list
         index of b0s in dwi NIfTI file
+    fsnative2t1w_xfm
+        FSL-style affine matrix translating from FreeSurfer T1.mgz to T1w
+    subjects_dir
+        FreeSurfer SUBJECTS_DIR
+    subject_id
+        FreeSurfer subject ID (must have folder in SUBJECTS_DIR)
 
     Outputs
     -------
@@ -72,7 +85,9 @@ def init_dwi_reference_wf(
     """
     workflow = Workflow(name=name)
 
-    inputnode = pe.Node(niu.IdentityInterface(fields=['dwi_file', 'b0_ixs']),
+    inputnode = pe.Node(niu.IdentityInterface(fields=['dwi_file', 'b0_ixs',
+                                      'fsnative2t1w_xfm', 'subjects_dir', 'subject_id',
+                                      'dwi_mask', 'validation_report']),
                         name='inputnode')
     outputnode = pe.Node(
         niu.IdentityInterface(fields=['dwi_file', 'raw_ref_image', 'ref_image',
@@ -86,10 +101,33 @@ def init_dwi_reference_wf(
 
     reg_b0 = pe.Node(fsl.MCFLIRT(ref_vol=0, interpolation='sinc'), name='reg_b0')
 
+    # For bbregister workflow 
+    bbr_wf = init_bbreg_wf(
+        use_bbr=use_bbr, bold2t1w_dof=9, bold2t1w_init='register', omp_nthreads=1, name='bbreg_wf')
+
     pre_mask = pe.Node(afni.Automask(dilate=1, outputtype='NIFTI_GZ'),
                        name='pre_mask')
 
     rescale_b0 = pe.Node(RescaleB0(), name='rescale_b0')
+
+    # If freesurfer is enabled, use bbregister
+    if freesurfer:
+        workflow.connect([
+            (extract_b0, bbr_wf, [('out_file', 'inputnode.in_file')]),
+            (inputnode, bbr_wf, [
+                ('fsnative2t1w_xfm', 'inputnode.fsnative2t1w_xfm'),
+                ('subjects_dir', 'inputnode.subjects_dir'),
+                ('subject_id', 'inputnode.subject_id')]),
+            (bbr_wf, pre_mask, [('outputnode.out_file', 'in_file')]),
+            (bbr_wf, rescale_b0, [('outputnode.out_file', 'in_file')]),
+        ])
+    # Otherwise default to flirt
+    else:
+        workflow.connect([
+            (extract_b0, reg_b0, [('out_file', 'in_file')]),
+            (reg_b0, pre_mask, [('out_file', 'in_file')]),
+            (reg_b0, rescale_b0, [('out_file', 'in_file')]),
+        ])
 
     enhance_and_skullstrip_dwi_wf = init_enhance_and_skullstrip_dwi_wf(
         omp_nthreads=omp_nthreads)
@@ -98,9 +136,6 @@ def init_dwi_reference_wf(
         (inputnode, validate, [('dwi_file', 'in_file')]),
         (validate, extract_b0, [('out_file', 'in_file')]),
         (inputnode, extract_b0, [('b0_ixs', 'b0_ixs')]),
-        (extract_b0, reg_b0, [('out_file', 'in_file')]),
-        (reg_b0, pre_mask, [('out_file', 'in_file')]),
-        (reg_b0, rescale_b0, [('out_file', 'in_file')]),
         (pre_mask, rescale_b0, [('out_file', 'mask_file')]),
         (rescale_b0, enhance_and_skullstrip_dwi_wf, [('out_ref', 'inputnode.in_file')]),
         (pre_mask, enhance_and_skullstrip_dwi_wf, [('out_file', 'inputnode.pre_mask')]),

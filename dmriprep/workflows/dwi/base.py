@@ -11,6 +11,7 @@ from .outputs import init_reportlets_wf
 
 def init_early_b0ref_wf(
     name="early_b0ref_wf",
+    freesurfer=True
 ):
     """
     Build an early :math:`b = 0` average reference for internal consumption of *dMRIPrep*.
@@ -34,6 +35,12 @@ def init_early_b0ref_wf(
         File path of the b-vectors
     in_bval
         File path of the b-values
+    fsnative2t1w_xfm
+        FSL-style affine matrix translating from FreeSurfer T1.mgz to T1w
+    subjects_dir
+        FreeSurfer SUBJECTS_DIR
+    subject_id
+        FreeSurfer subject ID (must have folder in SUBJECTS_DIR)
 
     Outputs
     -------
@@ -55,7 +62,10 @@ def init_early_b0ref_wf(
     workflow = Workflow(name=name)
 
     inputnode = pe.Node(niu.IdentityInterface(
-        fields=['dwi_file', 'in_bvec', 'in_bval']),
+        fields=[
+            'dwi_file', 'in_bvec', 'in_bval', 
+            'subjects_dir', 'subject_id', 'fsnative2t1w_xfm'
+            ]),
         name='inputnode')
 
     outputnode = pe.Node(niu.IdentityInterface(
@@ -66,7 +76,8 @@ def init_early_b0ref_wf(
 
     dwi_reference_wf = init_dwi_reference_wf(
         mem_gb=config.DEFAULT_MEMORY_MIN_GB,
-        omp_nthreads=config.nipype.omp_nthreads)
+        omp_nthreads=config.nipype.omp_nthreads,
+        freesurfer=freesurfer)
 
     # MAIN WORKFLOW STRUCTURE
     workflow.connect([
@@ -74,7 +85,11 @@ def init_early_b0ref_wf(
             ('dwi_file', 'dwi_file'),
             ('in_bvec', 'in_bvec'),
             ('in_bval', 'in_bval')]),
-        (inputnode, dwi_reference_wf, [('dwi_file', 'inputnode.dwi_file')]),
+        (inputnode, dwi_reference_wf, [
+            ('dwi_file', 'inputnode.dwi_file'),
+            ('subjects_dir', 'inputnode.subjects_dir'),
+            ('subject_id', 'inputnode.subject_id'),
+            ('fsnative2t1w_xfm', 'inputnode.fsnative2t1w_xfm')]),
         (gradient_table, dwi_reference_wf, [('b0_ixs', 'inputnode.b0_ixs')]),
         (dwi_reference_wf, outputnode, [
             ('outputnode.ref_image', 'dwi_reference'),
