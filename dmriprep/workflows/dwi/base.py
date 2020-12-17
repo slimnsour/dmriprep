@@ -175,7 +175,7 @@ def init_dwi_preproc_wf(dwi_file):
         # fmt:on
 
     # Eddy distortion correction
-    eddy_wf = init_eddy_wf(in_meta=layout.get_metadata(dwi_file))
+    eddy_wf = init_eddy_wf()
     # fmt:off
     workflow.connect([
         (dwi_reference_wf, eddy_wf, [
